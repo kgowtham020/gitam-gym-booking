@@ -1,0 +1,392 @@
+# src/gym_booking.py
+
+import time
+import sys
+import os
+from datetime import datetime, timedelta
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import Select
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+
+# Import CAPTCHA solver library
+from twocaptcha import TwoCaptcha
+
+# Add parent directory to path to import config
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config.settings import (
+    GITAM_LOGIN_URL, TARGET_HOUR, TARGET_MINUTE, TARGET_SECOND_BUFFER,
+    BOOKING_DATE_OFFSET, TARGET_GYM_SLOT, TARGET_FITNESS_CENTRE,
+    IMPLICIT_WAIT_TIME, EXPLICIT_WAIT_TIME, CAPTCHA_API_KEY
+)
+
+# --- User Credentials (Read from Environment Variables for Security) ---
+USER_ID = os.getenv("GITAM_USER_ID")
+PASSWORD = os.getenv("GITAM_PASSWORD")
+
+# --- CAPTCHA Solver Initialization ---
+captcha_solver = None
+if CAPTCHA_API_KEY:
+    captcha_solver = TwoCaptcha(CAPTCHA_API_KEY)
+else:
+    print("WARNING: CAPTCHA_API_KEY not found. CAPTCHA solving will fail.")
+
+# --- WebDriver Setup ---
+def initialize_driver():
+    """Initializes and returns a Chrome WebDriver instance."""
+    print("Initializing Chrome WebDriver...")
+    try:
+        options = webdriver.ChromeOptions()
+        # GitHub Actions environments are headless, so we must use headless mode
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox") # Required for some Linux environments like GitHub Actions
+        options.add_argument("--disable-dev-shm-usage") # Overcomes limited resource problems in Docker/CI
+        options.add_argument("--window-size=1920,1080") # Set window size for consistent element locating
+        options.add_argument("--disable-gpu") # Recommended for headless mode
+        options.add_argument("--log-level=3") # Suppress logs to avoid clutter
+        options.add_experimental_option('excludeSwitches', ['enable-logging']) # Suppress console warnings
+
+        driver = webdriver.Chrome(options=options)
+        driver.implicitly_wait(IMPLICIT_WAIT_TIME) # Set implicit wait time
+        print("WebDriver initialized successfully.")
+        return driver
+    except WebDriverException as e:
+        print(f"ERROR: Failed to initialize WebDriver: {e}")
+        print("Ensure Chrome is installed and ChromeDriver is compatible. 'webdriver-manager' handles this usually.")
+        return None
+
+# --- Core Automation Functions ---
+
+def solve_captcha(driver, captcha_element):
+    """
+    Captures the CAPTCHA image, sends it to 2Captcha service, and returns the solution.
+    """
+    if not captcha_solver:
+        print("ERROR: CAPTCHA solver not initialized. Cannot solve CAPTCHA.")
+        return None
+
+    print("Attempting to solve CAPTCHA via 2Captcha service...")
+    try:
+        # Get the screenshot of the CAPTCHA element as base64 string
+        captcha_image_base64 = captcha_element.screenshot_as_base64
+        # The 2Captcha library expects base64 string directly for `normal` method
+        
+        # [cite_start]We need to tell the solver it's numeric and has 5 digits as per source [cite: 6]
+        result = captcha_solver.normal(file=captcha_image_base64, numeric=1, minLength=5, maxLength=5)
+        
+        solved_code = result['code']
+        print(f"CAPTCHA solved by service: {solved_code}")
+        return solved_code
+    except Exception as e:
+        print(f"ERROR: Failed to solve CAPTCHA with 2Captcha service: {e}")
+        print("Check your API key, 2Captcha balance, or network connectivity.")
+        return None
+
+def login(driver, user_id, password):
+    """
+    Handles the login process, including automated CAPTCHA input via 2Captcha.
+    Returns True on successful login, False otherwise.
+    """
+    [cite_start]print(f"Navigating to GITAM Login Page: {GITAM_LOGIN_URL}") [cite: 1]
+    [cite_start]driver.get(GITAM_LOGIN_URL) [cite: 1]
+
+    try:
+        # Wait for User ID field and enter value
+        user_id_field = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.presence_of_element_located((By.ID, "userName"))
+        )
+        [cite_start]user_id_field.send_keys(user_id) [cite: 2]
+        print(f"Entered User ID.")
+
+        # Enter Password
+        password_field = driver.find_element(By.ID, "password")
+        [cite_start]password_field.send_keys(password) [cite: 3]
+        print("Entered Password.")
+
+        # --- Automated CAPTCHA Handling ---
+        captcha_image_element = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.presence_of_element_located((By.XPATH, "//img[contains(@src, 'captcha')]"))
+        )
+        [cite_start]solved_captcha = solve_captcha(driver, captcha_image_element) [cite: 5, 6]
+        if not solved_captcha:
+            print("Login failed: CAPTCHA could not be solved.")
+            return False
+
+        captcha_field = driver.find_element(By.ID, "captcha")
+        [cite_start]captcha_field.send_keys(solved_captcha) [cite: 5]
+        print("CAPTCHA entered.")
+
+        # Click Login
+        login_button = driver.find_element(By.ID, "login-button")
+        [cite_start]login_button.click() [cite: 7]
+        print("Clicked 'LOGIN' button.")
+
+        # [cite_start]Handle any immediate popups or notifications after login [cite: 8, 9]
+        try:
+            # Wait for a potential modal overlay to appear and disappear
+            WebDriverWait(driver, 5).until(
+                EC.invisibility_of_element_located((By.CLASS_NAME, "modal-backdrop"))
+            )
+        except TimeoutException:
+            pass # No modal, or it closed quickly
+
+        try:
+            # Look for common "Deny", "Cancel", or "Close" buttons on notification/popup dialogs
+            deny_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Deny')] | //button[contains(text(), 'Cancel')] | //button[contains(text(), 'Close')]"))
+            )
+            [cite_start]deny_button.click() [cite: 9]
+            print("Denied popup/notification.")
+        except TimeoutException:
+            print("No significant popups or notifications detected to deny.")
+        except Exception as e:
+            print(f"Error while trying to deny popup: {e}")
+
+        # Verify successful login by checking for a known element on the dashboard
+        WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.url_contains("dashboard") or EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'My dashboard')]"))
+        )
+        print("Login successful! Redirected to dashboard.")
+        return True
+    except TimeoutException as e:
+        print(f"Login failed: Timeout while waiting for an element. ({e})")
+        return False
+    except NoSuchElementException as e:
+        print(f"Login failed: Could not find a required element. ({e})")
+        print("Website structure might have changed. Please update selectors.")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during login: {e}")
+        return False
+
+def navigate_to_g_sports(driver):
+    """Navigates to the G-Sports application from the dashboard."""
+    print("Navigating to G-Sports...")
+    try:
+        # [cite_start]Click the six dots (App Launcher) [cite: 10]
+        app_launcher_xpath = "//button[contains(@class, 'app-launcher')] | //div[contains(@class, 'header-right')]//i[contains(@class, 'fa-th')] | //img[contains(@src, 'user.png')]/preceding-sibling::div/button"
+        app_launcher = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.element_to_be_clickable((By.XPATH, app_launcher_xpath))
+        )
+        [cite_start]app_launcher.click() [cite: 11]
+        print("Clicked the App Launcher (six dots).")
+
+        # [cite_start]Click on "G-Sports" App in the opened menu [cite: 13]
+        g_sports_app_xpath = "//span[contains(text(), 'G-Sports')] | //div[contains(@class, 'app-icon')]//img[contains(@src, 'sports')]/ancestor::a"
+        g_sports_app = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.element_to_be_clickable((By.XPATH, g_sports_app_xpath))
+        )
+        [cite_start]g_sports_app.click() [cite: 14]
+        [cite_start]print("Clicked on 'G-Sports' app. This opens the Sports Facilities in Bengaluru page.") [cite: 14]
+        return True
+    except TimeoutException:
+        print("Failed to navigate to G-Sports: App launcher or G-Sports app not found.")
+        return False
+    except Exception as e:
+        print(f"An error occurred during G-Sports navigation: {e}")
+        return False
+
+def select_fitness_centre(driver):
+    """Selects the 'Fitness Centre (Uni Sex)' option within the G-Sports app."""
+    [cite_start]print(f"Selecting '{TARGET_FITNESS_CENTRE}' option...") [cite: 17]
+    try:
+        # Locate and click the 'Fitness Centre (Uni Sex)' card/button
+        fitness_centre_xpath = f"//div[contains(text(), '{TARGET_FITNESS_CENTRE}')]"
+        fitness_centre_element = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.element_to_be_clickable((By.XPATH, fitness_centre_xpath))
+        )
+        [cite_start]fitness_centre_element.click() [cite: 17]
+        [cite_start]print(f"Selected '{TARGET_FITNESS_CENTRE}'. It opens up the booking interface.") [cite: 18]
+        return True
+    except TimeoutException:
+        print(f"Failed to select '{TARGET_FITNESS_CENTRE}': Element not found or not clickable.")
+        return False
+    except Exception as e:
+        print(f"An error occurred while selecting Fitness Centre: {e}")
+        return False
+
+def book_gym_slot(driver):
+    """
+    Attempts to book the specified gym slot for tomorrow's date.
+    This function should be called repeatedly during the booking window.
+    """
+    print("Attempting to book gym slot...")
+    try:
+        # [cite_start]1. Choose a Date (Tomorrow's date) [cite: 20]
+        # The date input field usually has an associated calendar.
+        date_input_xpath = "//input[contains(@placeholder, 'DD-Mon-YYYY')] | //div[contains(@class, 'date-picker')]//input"
+        date_input = WebDriverWait(driver, 5).until( # Short wait as we're in the loop
+            EC.element_to_be_clickable((By.XPATH, date_input_xpath))
+        )
+        [cite_start]date_input.click() # Click to open the calendar [cite: 20]
+        time.sleep(0.5) # Small pause for calendar to render
+
+        # Calculate tomorrow's date string in the expected format (e.g., "22-Jul-2025")
+        tomorrow = datetime.now() + timedelta(days=BOOKING_DATE_OFFSET)
+        tomorrow_str_day_month_year = tomorrow.strftime("%d-%b-%Y")
+        tomorrow_str_day_only = str(tomorrow.day)
+
+        # Select tomorrow's date from the calendar.
+        try:
+            # This XPath targets a table cell (td) with the day, common in datepickers.
+            # Also tries to find a div with the full date string.
+            target_date_element_xpath = f"//div[contains(@class, 'datepicker-days')]//td[contains(@class, 'day') and not(contains(@class, 'old')) and not(contains(@class, 'new')) and text()='{tomorrow_str_day_only}'] | //div[contains(@class, 'datepicker')]//div[contains(text(), '{tomorrow_str_day_month_year}')]"
+            target_date_element = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, target_date_element_xpath))
+            )
+            [cite_start]target_date_element.click() [cite: 20]
+            print(f"Selected booking date: {tomorrow_str_day_month_year}")
+            time.sleep(0.5) # Give page a moment to update slots
+        except TimeoutException:
+            print(f"Could not find or select tomorrow's date ({tomorrow_str_day_month_year}). It might not be available yet.")
+            return False
+
+        # [cite_start]2. Select court Dropdown (Fitness Centre (Unisex)) [cite: 21]
+        court_dropdown_xpath = "//select[contains(@class, 'form-control') and @name='courtId'] | //select[contains(@name, 'fitnessCentre')]"
+        court_dropdown_element = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.XPATH, court_dropdown_xpath))
+        )
+        select_court = Select(court_dropdown_element)
+        [cite_start]select_court.select_by_visible_text(TARGET_FITNESS_CENTRE) [cite: 21]
+        print(f"Selected court: '{TARGET_FITNESS_CENTRE}'.")
+        time.sleep(1) # Give page a moment to load slots after court selection
+
+        # [cite_start]3. Pick an available Time Slot (e.g., 06:00 AM - 07:00 AM) [cite: 22]
+        # Look for the specific slot and ensure it's not "Reserved"
+        target_slot_xpath = f"//div[contains(@class, 'shift-slot-wrap')]//div[contains(text(), '{TARGET_GYM_SLOT}') and not(contains(@class, 'Reserved'))]"
+        target_slot_element = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, target_slot_xpath))
+        )
+        [cite_start]target_slot_element.click() [cite: 23]
+        print(f"Selected time slot: '{TARGET_GYM_SLOT}'.")
+        time.sleep(0.5) # Short pause before clicking reserve
+
+        # [cite_start]4. Click “Reserve” button [cite: 24]
+        reserve_button_xpath = "//button[contains(text(), 'Reserve')]"
+        reserve_button = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, reserve_button_xpath))
+        )
+        [cite_start]reserve_button.click() [cite: 24]
+        print("Clicked 'Reserve' button.")
+
+        # 5. Verify booking success or failure message
+        try:
+            # Look for success message (adjust based on actual text from the site)
+            [cite_start]success_message_xpath = "//div[contains(@class, 'alert-success')] | //span[contains(text(), 'successfully reserved')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot')]" # [cite: 18] shows 'You have reserved 06:00 AM to 07:00 AM slot.' as an info message if already reserved, so we need to be careful
+            WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+                EC.presence_of_element_located((By.XPATH, success_message_xpath))
+            )
+            print("Gym slot reserved successfully!")
+            return True
+        except TimeoutException:
+            # Look for error/already reserved message
+            [cite_start]error_message_xpath = "//div[contains(@class, 'alert-danger')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot.')] | //span[contains(text(), 'Error')]" [cite: 18]
+            try:
+                error_message = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, error_message_xpath))
+                )
+                print(f"Booking attempt failed: {error_message.text}")
+            except TimeoutException:
+                print("Booking attempt finished, but no clear success or error message appeared within timeout. Manual check might be needed.")
+            return False
+
+    except TimeoutException as e:
+        print(f"Booking attempt failed: Timeout while waiting for an element ({e}). Slot might not be available or page didn't load.")
+        return False
+    except NoSuchElementException as e:
+        print(f"Booking attempt failed: Could not find a required element ({e}). Website structure might have changed.")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during slot booking: {e}")
+        return False
+
+def main():
+    """Main function to orchestrate the gym slot booking process."""
+    if not USER_ID or not PASSWORD:
+        print("ERROR: GITAM_USER_ID or GITAM_PASSWORD environment variables are not set.")
+        print("Please configure them as GitHub Secrets.")
+        return
+
+    driver = initialize_driver()
+    if driver is None:
+        print("Failed to initialize WebDriver. Exiting.")
+        return
+
+    try:
+        # Step 1: Login
+        if not login(driver, USER_ID, PASSWORD):
+            print("Login failed. Exiting.")
+            return
+
+        # Step 2: Navigate to G-Sports
+        if not navigate_to_g_sports(driver):
+            print("Navigation to G-Sports failed. Exiting.")
+            return
+
+        # Step 3: Select Fitness Centre
+        if not select_fitness_centre(driver):
+            print("Selection of Fitness Centre failed. Exiting.")
+            return
+
+        # Step 4: Wait for the precise booking time and attempt to book
+        current_time_ist = datetime.now() # Current time is Monday, July 21, 2025 at 9:36:52 AM IST.
+        print(f"\nCurrent time: {current_time_ist.strftime('%H:%M:%S')} IST.")
+        print(f"Waiting for precise booking time: {TARGET_HOUR:02d}:{TARGET_MINUTE:02d} IST...")
+        print("The script will start attempting to book a few seconds before the target time.")
+
+        while True:
+            now = datetime.now()
+            # Calculate the target time for today (current date, but target hour/minute)
+            target_booking_time_today = now.replace(hour=TARGET_HOUR, minute=TARGET_MINUTE, second=0, microsecond=0)
+
+            # If current time is past today's target booking time by more than a buffer, exit
+            if now > target_booking_time_today + timedelta(minutes=5): # Give 5 min buffer to capture any late availability
+                print("Booking window for today has likely passed. Exiting.")
+                break
+
+            # If it's not yet close to the booking time, sleep
+            # Sleep until (TARGET_SECOND_BUFFER + 5) seconds before TARGET_MINUTE
+            time_until_start_attempt = (target_booking_time_today - now).total_seconds() - (TARGET_SECOND_BUFFER + 5)
+            if time_until_start_attempt > 0:
+                print(f"Sleeping for {int(time_until_start_attempt)} seconds until closer to booking window...")
+                time.sleep(time_until_start_attempt)
+                continue # Recheck time after sleep
+
+            # We are within the booking window (e.g., 2:58:55 PM onwards for a 3 PM booking)
+            print(f"Approaching booking time. Current time: {now.strftime('%H:%M:%S')}. Initiating rapid attempts...")
+            # Loop quickly checking current time until it's just before or at the target second buffer
+            booking_success = False
+            for attempt in range(10): # Try 10 times in quick succession
+                current_time = datetime.now()
+                if current_time.hour == TARGET_HOUR and current_time.minute == TARGET_MINUTE and current_time.second >= TARGET_SECOND_BUFFER:
+                    print(f"Attempt {attempt + 1}: Booking at {current_time.strftime('%H:%M:%S')}...")
+                    if book_gym_slot(driver):
+                        print("Booking completed successfully!")
+                        booking_success = True
+                        break # Exit loop upon successful booking
+                    else:
+                        print("Booking attempt failed. Retrying in 1 second...")
+                        time.sleep(1) # Wait a short moment before retrying
+                elif current_time.hour > TARGET_HOUR or (current_time.hour == TARGET_HOUR and current_time.minute > TARGET_MINUTE + 2):
+                    print("Booking window likely closed or slot taken. Exiting retries.")
+                    break # Exit inner loop if time has passed significantly
+                else:
+                    time.sleep(0.1) # Check every 100ms for precise timing
+
+            if booking_success:
+                break # Exit outer loop if booking was successful
+
+            if not booking_success:
+                print("All booking attempts failed within the window. Exiting.")
+                break # Exit if all attempts within the window failed
+
+    finally:
+        print("\nClosing browser...")
+        if driver:
+            driver.quit()
+        print("Script finished.")
+
+if __name__ == "__main__":
+    main()

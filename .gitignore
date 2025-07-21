@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+venv/
+env/
+
+# OS
+.DS_Store
+.vscode/
+
+# Logs
+*.log
+
+# Sensitive data (if you add any later)
+*.env
+.env
+settings.pyc # If compiled
