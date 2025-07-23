@@ -20,12 +20,17 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 # Add parent directory to path to import config
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config.settings import (
-    GITAM_LOGIN_URL, USER_ID, PASSWORD, # USER_ID and PASSWORD are now from settings.py
+    GITAM_LOGIN_URL, # USER_ID and PASSWORD are now from os.getenv(), so remove them here
     TARGET_HOUR, TARGET_MINUTE, TARGET_SECOND_BUFFER,
     BOOKING_DATE_OFFSET, TARGET_GYM_SLOT, TARGET_FITNESS_CENTRE,
     IMPLICIT_WAIT_TIME, EXPLICIT_WAIT_TIME
     # CAPTCHA_API_KEY is not needed anymore for this method
 )
+
+# --- User Credentials (Read from Environment Variables for Security) ---
+# These are correctly read from environment variables, which GitHub Actions will provide.
+USER_ID = os.getenv("GITAM_USER_ID")
+PASSWORD = os.getenv("GITAM_PASSWORD")
 
 # --- WebDriver Setup ---
 def initialize_driver():
@@ -58,7 +63,7 @@ def login(driver, user_id, password):
     Handles the login process, automatically reading CAPTCHA from span elements.
     Returns True on successful login, False otherwise.
     """
-    print(f"Navigating to GITAM Login Page: {GITAM_LOGIN_URL}") # Line 64 was here
+    print(f"Navigating to GITAM Login Page: {GITAM_LOGIN_URL}")
     driver.get(GITAM_LOGIN_URL)
 
     try:
