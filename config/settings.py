@@ -1,6 +1,11 @@
 # config/settings.py
 import os
 
+# --- User Credentials (Read from Environment Variables for Security) ---
+# For GitHub Actions, these will be set via repository secrets.
+USER_ID = os.getenv("GITAM_USER_ID")
+PASSWORD = os.getenv("GITAM_PASSWORD")
+
 # --- Website URLs ---
 GITAM_LOGIN_URL = "https://login.gitam.edu/"
 
@@ -15,8 +20,3 @@ TARGET_FITNESS_CENTRE = "UniSex Fitness Centre"
 # --- Selenium Configuration ---
 IMPLICIT_WAIT_TIME = 10 # Seconds for implicit waits
 EXPLICIT_WAIT_TIME = 20 # Seconds for explicit waits (e.g., for elements to be clickable)
-
-# --- CAPTCHA Service Configuration ---
-# This will be read from environment variables, which will be set by GitHub Actions Secrets.
-# DO NOT hardcode your CAPTCHA_API_KEY here in a public repository!
-CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY")

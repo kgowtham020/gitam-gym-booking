@@ -2,34 +2,40 @@ name: Gym Slot Booker
 
 on:
   schedule:
+    # Runs at 2:58 PM IST every day.
+    # IST is UTC+5:30.
+    # 2:58 PM IST = 14:58 IST
+    # 14:58 IST - 5 hours 30 minutes = 09:28 UTC
     - cron: '28 9 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
   book_gym_slot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Use a Linux environment provided by GitHub
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4 # Action to check out your repository code
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v5 # Action to set up Python environment
       with:
-        python-version: '3.x'
+        python-version: '3.x' # Use the latest Python 3.x
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        python -m pip install --upgrade pip # Ensure pip is up-to-date
+        pip install -r requirements.txt # Install project dependencies from requirements.txt
 
     - name: Install Chrome
       run: |
         sudo apt-get update
-        sudo apt-get install google-chrome-stable -y
+        sudo apt-get install google-chrome-stable -y # Install Google Chrome browser
 
     - name: Run Gym Booking Script
       env:
+        # Pass secrets as environment variables to the Python script
+        # These correspond to the names you set in GitHub Secrets
         GITAM_USER_ID: ${{ secrets.GITAM_USER_ID }}
         GITAM_PASSWORD: ${{ secrets.GITAM_PASSWORD }}
-      run: python src/gym_booking.py
+      run: python src/gym_booking.py # Execute your Python script

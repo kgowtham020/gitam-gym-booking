@@ -11,24 +11,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 
-# No need for pytesseract, PIL, io, or TwoCaptcha if CAPTCHA is readable text
-# from PIL import Image
-# import pytesseract
-# import io
-# from twocaptcha import TwoCaptcha
-
 # Add parent directory to path to import config
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config.settings import (
-    GITAM_LOGIN_URL, # USER_ID and PASSWORD are now from os.getenv(), so remove them here
+    GITAM_LOGIN_URL, # USER_ID and PASSWORD are now from os.getenv(), so removed from here
     TARGET_HOUR, TARGET_MINUTE, TARGET_SECOND_BUFFER,
     BOOKING_DATE_OFFSET, TARGET_GYM_SLOT, TARGET_FITNESS_CENTRE,
     IMPLICIT_WAIT_TIME, EXPLICIT_WAIT_TIME
-    # CAPTCHA_API_KEY is not needed anymore for this method
 )
 
 # --- User Credentials (Read from Environment Variables for Security) ---
-# These are correctly read from environment variables, which GitHub Actions will provide.
 USER_ID = os.getenv("GITAM_USER_ID")
 PASSWORD = os.getenv("GITAM_PASSWORD")
 
@@ -129,6 +121,7 @@ def login(driver, user_id, password):
             print(f"Error while trying to deny popup: {e}")
 
         # Verify successful login by checking for a known element on the dashboard
+        # This is the line that timed out previously.
         WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
             EC.url_contains("dashboard") or EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'My dashboard')]"))
         )
@@ -136,6 +129,7 @@ def login(driver, user_id, password):
         return True
     except TimeoutException as e:
         print(f"Login failed: Timeout while waiting for an element. ({e})")
+        print("Possible issues: Incorrect credentials, incorrect CAPTCHA, or slow page load. Verify site structure.")
         return False
     except NoSuchElementException as e:
         print(f"Login failed: Could not find a required element. ({e})")
