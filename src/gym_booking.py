@@ -53,28 +53,25 @@ def initialize_driver():
 
 # --- Core Automation Functions ---
 
-# REMOVE solve_captcha_with_ocr function entirely
-# REMOVE solve_captcha function if it was still there for 2Captcha
-
 def login(driver, user_id, password):
     """
     Handles the login process, automatically reading CAPTCHA from span elements.
     Returns True on successful login, False otherwise.
     """
-    [cite_start]print(f"Navigating to GITAM Login Page: {GITAM_LOGIN_URL}") [cite: 1]
-    [cite_start]driver.get(GITAM_LOGIN_URL) [cite: 1]
+    print(f"Navigating to GITAM Login Page: {GITAM_LOGIN_URL}") # Line 64 was here
+    driver.get(GITAM_LOGIN_URL)
 
     try:
         # Wait for User ID field and enter value
         user_id_field = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
             EC.presence_of_element_located((By.ID, "userName"))
         )
-        [cite_start]user_id_field.send_keys(user_id) [cite: 2]
+        user_id_field.send_keys(user_id)
         print(f"Entered User ID.")
 
         # Enter Password
         password_field = driver.find_element(By.ID, "password")
-        [cite_start]password_field.send_keys(password) [cite: 3]
+        password_field.send_keys(password)
         print("Entered Password.")
 
         # --- Automated CAPTCHA Handling: Extracting text from spans ---
@@ -86,28 +83,28 @@ def login(driver, user_id, password):
         captcha_spans = driver.find_elements(By.XPATH, "//div[@class='preview']//span")
         # Concatenate the text from each span to get the full CAPTCHA
         captcha_text = ''.join([span.get_attribute("innerHTML").strip() for span in captcha_spans])
-        
+
         # Clean up the CAPTCHA text, ensuring it's only digits (as per your CAPTCHA type)
         # This handles cases where innerHTML might contain spaces or non-digit chars
         solved_captcha = ''.join(filter(str.isdigit, captcha_text))
 
-        [cite_start]if not solved_captcha or len(solved_captcha) != 5: # Assuming it's always 5 digits [cite: 6]
+        if not solved_captcha or len(solved_captcha) != 5: # Assuming it's always 5 digits
             print(f"ERROR: Could not extract valid 5-digit CAPTCHA. Extracted: '{solved_captcha}' (from raw '{captcha_text}')")
             return False
 
         print("CAPTCHA read automatically:", solved_captcha)
 
         # Enter the CAPTCHA text into the input field
-        [cite_start]captcha_field = driver.find_element(By.ID, "captcha") # Assuming this is still the correct ID [cite: 5]
-        [cite_start]captcha_field.send_keys(solved_captcha) [cite: 5]
+        captcha_field = driver.find_element(By.ID, "captcha") # Assuming this is still the correct ID
+        captcha_field.send_keys(solved_captcha)
         print("CAPTCHA entered into field.")
 
         # Click Login
         login_button = driver.find_element(By.ID, "login-button")
-        [cite_start]login_button.click() [cite: 7]
+        login_button.click()
         print("Clicked 'LOGIN' button.")
 
-        # [cite_start]Handle any immediate popups or notifications after login [cite: 8, 9]
+        # Handle any immediate popups or notifications after login
         try:
             WebDriverWait(driver, 5).until(
                 EC.invisibility_of_element_located((By.CLASS_NAME, "modal-backdrop"))
@@ -119,7 +116,7 @@ def login(driver, user_id, password):
             deny_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Deny')] | //button[contains(text(), 'Cancel')] | //button[contains(text(), 'Close')]"))
             )
-            [cite_start]deny_button.click() [cite: 9]
+            deny_button.click()
             print("Denied popup/notification.")
         except TimeoutException:
             print("No significant popups or notifications detected to deny.")
@@ -147,21 +144,21 @@ def navigate_to_g_sports(driver):
     """Navigates to the G-Sports application from the dashboard."""
     print("Navigating to G-Sports...")
     try:
-        # [cite_start]Click the six dots (App Launcher) [cite: 10]
+        # Click the six dots (App Launcher)
         app_launcher_xpath = "//button[contains(@class, 'app-launcher')] | //div[contains(@class, 'header-right')]//i[contains(@class, 'fa-th')] | //img[contains(@src, 'user.png')]/preceding-sibling::div/button"
         app_launcher = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
             EC.element_to_be_clickable((By.XPATH, app_launcher_xpath))
         )
-        [cite_start]app_launcher.click() [cite: 11]
+        app_launcher.click()
         print("Clicked the App Launcher (six dots).")
 
-        # [cite_start]Click on "G-Sports" App in the opened menu [cite: 13]
+        # Click on "G-Sports" App in the opened menu
         g_sports_app_xpath = "//span[contains(text(), 'G-Sports')] | //div[contains(@class, 'app-icon')]//img[contains(@src, 'sports')]/ancestor::a"
         g_sports_app = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
             EC.element_to_be_clickable((By.XPATH, g_sports_app_xpath))
         )
-        [cite_start]g_sports_app.click() [cite: 14]
-        [cite_start]print("Clicked on 'G-Sports' app. This opens the Sports Facilities in Bengaluru page.") [cite: 14]
+        g_sports_app.click()
+        print("Clicked on 'G-Sports' app. This opens the Sports Facilities in Bengaluru page.")
         return True
     except TimeoutException:
         print("Failed to navigate to G-Sports: App launcher or G-Sports app not found.")
@@ -172,15 +169,15 @@ def navigate_to_g_sports(driver):
 
 def select_fitness_centre(driver):
     """Selects the 'Fitness Centre (Uni Sex)' option within the G-Sports app."""
-    [cite_start]print(f"Selecting '{TARGET_FITNESS_CENTRE}' option...") [cite: 17]
+    print(f"Selecting '{TARGET_FITNESS_CENTRE}' option...")
     try:
         # Locate and click the 'Fitness Centre (Uni Sex)' card/button
         fitness_centre_xpath = f"//div[contains(text(), '{TARGET_FITNESS_CENTRE}')]"
         fitness_centre_element = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
             EC.element_to_be_clickable((By.XPATH, fitness_centre_xpath))
         )
-        [cite_start]fitness_centre_element.click() [cite: 17]
-        [cite_start]print(f"Selected '{TARGET_FITNESS_CENTRE}'. It opens up the booking interface.") [cite: 18]
+        fitness_centre_element.click()
+        print(f"Selected '{TARGET_FITNESS_CENTRE}'. It opens up the booking interface.")
         return True
     except TimeoutException:
         print(f"Failed to select '{TARGET_FITNESS_CENTRE}': Element not found or not clickable.")
@@ -196,12 +193,12 @@ def book_gym_slot(driver):
     """
     print("Attempting to book gym slot...")
     try:
-        # [cite_start]1. Choose a Date (Tomorrow's date) [cite: 20]
+        # 1. Choose a Date (Tomorrow's date)
         date_input_xpath = "//input[contains(@placeholder, 'DD-Mon-YYYY')] | //div[contains(@class, 'date-picker')]//input"
         date_input = WebDriverWait(driver, 5).until( # Short wait as we're in the loop
             EC.element_to_be_clickable((By.XPATH, date_input_xpath))
         )
-        [cite_start]date_input.click() [cite: 20]
+        date_input.click()
         time.sleep(0.5) # Small pause for calendar to render
 
         # Calculate tomorrow's date string in the expected format (e.g., "22-Jul-2025")
@@ -215,43 +212,43 @@ def book_gym_slot(driver):
             target_date_element = WebDriverWait(driver, 3).until(
                 EC.element_to_be_clickable((By.XPATH, target_date_element_xpath))
             )
-            [cite_start]target_date_element.click() [cite: 20]
+            target_date_element.click()
             print(f"Selected booking date: {tomorrow_str_day_month_year}")
             time.sleep(0.5) # Give page a moment to update slots
         except TimeoutException:
             print(f"Could not find or select tomorrow's date ({tomorrow_str_day_month_year}). It might not be available yet.")
             return False
 
-        # [cite_start]2. Select court Dropdown (Fitness Centre (Unisex)) [cite: 21]
+        # 2. Select court Dropdown (Fitness Centre (Unisex))
         court_dropdown_xpath = "//select[contains(@class, 'form-control') and @name='courtId'] | //select[contains(@name, 'fitnessCentre')]"
         court_dropdown_element = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.XPATH, court_dropdown_xpath))
         )
         select_court = Select(court_dropdown_element)
-        [cite_start]select_court.select_by_visible_text(TARGET_FITNESS_CENTRE) [cite: 21]
+        select_court.select_by_visible_text(TARGET_FITNESS_CENTRE)
         print(f"Selected court: '{TARGET_FITNESS_CENTRE}'.")
         time.sleep(1) # Give page a moment to load slots after court selection
 
-        # [cite_start]3. Pick an available Time Slot (e.g., 06:00 AM - 07:00 AM) [cite: 22]
+        # 3. Pick an available Time Slot (e.g., 06:00 AM - 07:00 AM)
         target_slot_xpath = f"//div[contains(@class, 'shift-slot-wrap')]//div[contains(text(), '{TARGET_GYM_SLOT}') and not(contains(@class, 'Reserved'))]"
         target_slot_element = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, target_slot_xpath))
         )
-        [cite_start]target_slot_element.click() [cite: 23]
+        target_slot_element.click()
         print(f"Selected time slot: '{TARGET_GYM_SLOT}'.")
         time.sleep(0.5) # Short pause before clicking reserve
 
-        # [cite_start]4. Click “Reserve” button [cite: 24]
+        # 4. Click “Reserve” button
         reserve_button_xpath = "//button[contains(text(), 'Reserve')]"
         reserve_button = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, reserve_button_xpath))
         )
-        [cite_start]reserve_button.click() [cite: 24]
+        reserve_button.click()
         print("Clicked 'Reserve' button.")
 
         # 5. Verify booking success or failure message
         try:
-            [cite_start]success_message_xpath = "//div[contains(@class, 'alert-success')] | //span[contains(text(), 'successfully reserved')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot')]" [cite: 18]
+            success_message_xpath = "//div[contains(@class, 'alert-success')] | //span[contains(text(), 'successfully reserved')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot')]"
             WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
                 EC.presence_of_element_located((By.XPATH, success_message_xpath))
             )
@@ -259,7 +256,7 @@ def book_gym_slot(driver):
             return True
         except TimeoutException:
             # Look for error/already reserved message
-            [cite_start]error_message_xpath = "//div[contains(@class, 'alert-danger')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot.')] | //span[contains(text(), 'Error')]" [cite: 18]
+            error_message_xpath = "//div[contains(@class, 'alert-danger')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot.')] | //span[contains(text(), 'Error')]"
             try:
                 error_message = WebDriverWait(driver, 5).until(
                     EC.presence_of_element_located((By.XPATH, error_message_xpath))
