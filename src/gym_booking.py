@@ -11,27 +11,21 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 
-# Import CAPTCHA solver library
-from twocaptcha import TwoCaptcha
+# No need for pytesseract, PIL, io, or TwoCaptcha if CAPTCHA is readable text
+# from PIL import Image
+# import pytesseract
+# import io
+# from twocaptcha import TwoCaptcha
 
 # Add parent directory to path to import config
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config.settings import (
-    GITAM_LOGIN_URL, TARGET_HOUR, TARGET_MINUTE, TARGET_SECOND_BUFFER,
+    GITAM_LOGIN_URL, USER_ID, PASSWORD, # USER_ID and PASSWORD are now from settings.py
+    TARGET_HOUR, TARGET_MINUTE, TARGET_SECOND_BUFFER,
     BOOKING_DATE_OFFSET, TARGET_GYM_SLOT, TARGET_FITNESS_CENTRE,
-    IMPLICIT_WAIT_TIME, EXPLICIT_WAIT_TIME, CAPTCHA_API_KEY
+    IMPLICIT_WAIT_TIME, EXPLICIT_WAIT_TIME
+    # CAPTCHA_API_KEY is not needed anymore for this method
 )
-
-# --- User Credentials (Read from Environment Variables for Security) ---
-USER_ID = os.getenv("GITAM_USER_ID")
-PASSWORD = os.getenv("GITAM_PASSWORD")
-
-# --- CAPTCHA Solver Initialization ---
-captcha_solver = None
-if CAPTCHA_API_KEY:
-    captcha_solver = TwoCaptcha(CAPTCHA_API_KEY)
-else:
-    print("WARNING: CAPTCHA_API_KEY not found. CAPTCHA solving will fail.")
 
 # --- WebDriver Setup ---
 def initialize_driver():
@@ -41,15 +35,15 @@ def initialize_driver():
         options = webdriver.ChromeOptions()
         # GitHub Actions environments are headless, so we must use headless mode
         options.add_argument("--headless")
-        options.add_argument("--no-sandbox") # Required for some Linux environments like GitHub Actions
-        options.add_argument("--disable-dev-shm-usage") # Overcomes limited resource problems in Docker/CI
-        options.add_argument("--window-size=1920,1080") # Set window size for consistent element locating
-        options.add_argument("--disable-gpu") # Recommended for headless mode
-        options.add_argument("--log-level=3") # Suppress logs to avoid clutter
-        options.add_experimental_option('excludeSwitches', ['enable-logging']) # Suppress console warnings
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--log-level=3")
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
         driver = webdriver.Chrome(options=options)
-        driver.implicitly_wait(IMPLICIT_WAIT_TIME) # Set implicit wait time
+        driver.implicitly_wait(IMPLICIT_WAIT_TIME)
         print("WebDriver initialized successfully.")
         return driver
     except WebDriverException as e:
@@ -59,34 +53,12 @@ def initialize_driver():
 
 # --- Core Automation Functions ---
 
-def solve_captcha(driver, captcha_element):
-    """
-    Captures the CAPTCHA image, sends it to 2Captcha service, and returns the solution.
-    """
-    if not captcha_solver:
-        print("ERROR: CAPTCHA solver not initialized. Cannot solve CAPTCHA.")
-        return None
-
-    print("Attempting to solve CAPTCHA via 2Captcha service...")
-    try:
-        # Get the screenshot of the CAPTCHA element as base64 string
-        captcha_image_base64 = captcha_element.screenshot_as_base64
-        # The 2Captcha library expects base64 string directly for `normal` method
-        
-        # [cite_start]We need to tell the solver it's numeric and has 5 digits as per source [cite: 6]
-        result = captcha_solver.normal(file=captcha_image_base64, numeric=1, minLength=5, maxLength=5)
-        
-        solved_code = result['code']
-        print(f"CAPTCHA solved by service: {solved_code}")
-        return solved_code
-    except Exception as e:
-        print(f"ERROR: Failed to solve CAPTCHA with 2Captcha service: {e}")
-        print("Check your API key, 2Captcha balance, or network connectivity.")
-        return None
+# REMOVE solve_captcha_with_ocr function entirely
+# REMOVE solve_captcha function if it was still there for 2Captcha
 
 def login(driver, user_id, password):
     """
-    Handles the login process, including automated CAPTCHA input via 2Captcha.
+    Handles the login process, automatically reading CAPTCHA from span elements.
     Returns True on successful login, False otherwise.
     """
     [cite_start]print(f"Navigating to GITAM Login Page: {GITAM_LOGIN_URL}") [cite: 1]
@@ -105,18 +77,30 @@ def login(driver, user_id, password):
         [cite_start]password_field.send_keys(password) [cite: 3]
         print("Entered Password.")
 
-        # --- Automated CAPTCHA Handling ---
-        captcha_image_element = WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
-            EC.presence_of_element_located((By.XPATH, "//img[contains(@src, 'captcha')]"))
+        # --- Automated CAPTCHA Handling: Extracting text from spans ---
+        # Wait for the CAPTCHA spans to be present
+        WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
+            EC.presence_of_all_elements_located((By.XPATH, "//div[@class='preview']//span"))
         )
-        [cite_start]solved_captcha = solve_captcha(driver, captcha_image_element) [cite: 5, 6]
-        if not solved_captcha:
-            print("Login failed: CAPTCHA could not be solved.")
+        # Find all span elements within the preview div
+        captcha_spans = driver.find_elements(By.XPATH, "//div[@class='preview']//span")
+        # Concatenate the text from each span to get the full CAPTCHA
+        captcha_text = ''.join([span.get_attribute("innerHTML").strip() for span in captcha_spans])
+        
+        # Clean up the CAPTCHA text, ensuring it's only digits (as per your CAPTCHA type)
+        # This handles cases where innerHTML might contain spaces or non-digit chars
+        solved_captcha = ''.join(filter(str.isdigit, captcha_text))
+
+        [cite_start]if not solved_captcha or len(solved_captcha) != 5: # Assuming it's always 5 digits [cite: 6]
+            print(f"ERROR: Could not extract valid 5-digit CAPTCHA. Extracted: '{solved_captcha}' (from raw '{captcha_text}')")
             return False
 
-        captcha_field = driver.find_element(By.ID, "captcha")
+        print("CAPTCHA read automatically:", solved_captcha)
+
+        # Enter the CAPTCHA text into the input field
+        [cite_start]captcha_field = driver.find_element(By.ID, "captcha") # Assuming this is still the correct ID [cite: 5]
         [cite_start]captcha_field.send_keys(solved_captcha) [cite: 5]
-        print("CAPTCHA entered.")
+        print("CAPTCHA entered into field.")
 
         # Click Login
         login_button = driver.find_element(By.ID, "login-button")
@@ -125,15 +109,13 @@ def login(driver, user_id, password):
 
         # [cite_start]Handle any immediate popups or notifications after login [cite: 8, 9]
         try:
-            # Wait for a potential modal overlay to appear and disappear
             WebDriverWait(driver, 5).until(
                 EC.invisibility_of_element_located((By.CLASS_NAME, "modal-backdrop"))
             )
         except TimeoutException:
-            pass # No modal, or it closed quickly
+            pass
 
         try:
-            # Look for common "Deny", "Cancel", or "Close" buttons on notification/popup dialogs
             deny_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Deny')] | //button[contains(text(), 'Cancel')] | //button[contains(text(), 'Close')]"))
             )
@@ -215,12 +197,11 @@ def book_gym_slot(driver):
     print("Attempting to book gym slot...")
     try:
         # [cite_start]1. Choose a Date (Tomorrow's date) [cite: 20]
-        # The date input field usually has an associated calendar.
         date_input_xpath = "//input[contains(@placeholder, 'DD-Mon-YYYY')] | //div[contains(@class, 'date-picker')]//input"
         date_input = WebDriverWait(driver, 5).until( # Short wait as we're in the loop
             EC.element_to_be_clickable((By.XPATH, date_input_xpath))
         )
-        [cite_start]date_input.click() # Click to open the calendar [cite: 20]
+        [cite_start]date_input.click() [cite: 20]
         time.sleep(0.5) # Small pause for calendar to render
 
         # Calculate tomorrow's date string in the expected format (e.g., "22-Jul-2025")
@@ -230,8 +211,6 @@ def book_gym_slot(driver):
 
         # Select tomorrow's date from the calendar.
         try:
-            # This XPath targets a table cell (td) with the day, common in datepickers.
-            # Also tries to find a div with the full date string.
             target_date_element_xpath = f"//div[contains(@class, 'datepicker-days')]//td[contains(@class, 'day') and not(contains(@class, 'old')) and not(contains(@class, 'new')) and text()='{tomorrow_str_day_only}'] | //div[contains(@class, 'datepicker')]//div[contains(text(), '{tomorrow_str_day_month_year}')]"
             target_date_element = WebDriverWait(driver, 3).until(
                 EC.element_to_be_clickable((By.XPATH, target_date_element_xpath))
@@ -254,7 +233,6 @@ def book_gym_slot(driver):
         time.sleep(1) # Give page a moment to load slots after court selection
 
         # [cite_start]3. Pick an available Time Slot (e.g., 06:00 AM - 07:00 AM) [cite: 22]
-        # Look for the specific slot and ensure it's not "Reserved"
         target_slot_xpath = f"//div[contains(@class, 'shift-slot-wrap')]//div[contains(text(), '{TARGET_GYM_SLOT}') and not(contains(@class, 'Reserved'))]"
         target_slot_element = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, target_slot_xpath))
@@ -273,8 +251,7 @@ def book_gym_slot(driver):
 
         # 5. Verify booking success or failure message
         try:
-            # Look for success message (adjust based on actual text from the site)
-            [cite_start]success_message_xpath = "//div[contains(@class, 'alert-success')] | //span[contains(text(), 'successfully reserved')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot')]" # [cite: 18] shows 'You have reserved 06:00 AM to 07:00 AM slot.' as an info message if already reserved, so we need to be careful
+            [cite_start]success_message_xpath = "//div[contains(@class, 'alert-success')] | //span[contains(text(), 'successfully reserved')] | //div[contains(text(), 'You have reserved 06:00 AM to 07:00 AM slot')]" [cite: 18]
             WebDriverWait(driver, EXPLICIT_WAIT_TIME).until(
                 EC.presence_of_element_located((By.XPATH, success_message_xpath))
             )
@@ -331,32 +308,27 @@ def main():
             return
 
         # Step 4: Wait for the precise booking time and attempt to book
-        current_time_ist = datetime.now() # Current time is Monday, July 21, 2025 at 9:36:52 AM IST.
-        print(f"\nCurrent time: {current_time_ist.strftime('%H:%M:%S')} IST.")
+        current_time_ist = datetime.now()
+        print(f"\nCurrent time: {current_time_ist.strftime('%H:%M:%S')} (Assuming IST timezone for booking logic).")
         print(f"Waiting for precise booking time: {TARGET_HOUR:02d}:{TARGET_MINUTE:02d} IST...")
         print("The script will start attempting to book a few seconds before the target time.")
+        print("NOTE: CAPTCHA is read directly from HTML elements. This is very reliable if elements remain consistent.")
 
         while True:
             now = datetime.now()
-            # Calculate the target time for today (current date, but target hour/minute)
             target_booking_time_today = now.replace(hour=TARGET_HOUR, minute=TARGET_MINUTE, second=0, microsecond=0)
 
-            # If current time is past today's target booking time by more than a buffer, exit
-            if now > target_booking_time_today + timedelta(minutes=5): # Give 5 min buffer to capture any late availability
+            if now > target_booking_time_today + timedelta(minutes=5):
                 print("Booking window for today has likely passed. Exiting.")
                 break
 
-            # If it's not yet close to the booking time, sleep
-            # Sleep until (TARGET_SECOND_BUFFER + 5) seconds before TARGET_MINUTE
             time_until_start_attempt = (target_booking_time_today - now).total_seconds() - (TARGET_SECOND_BUFFER + 5)
             if time_until_start_attempt > 0:
                 print(f"Sleeping for {int(time_until_start_attempt)} seconds until closer to booking window...")
                 time.sleep(time_until_start_attempt)
-                continue # Recheck time after sleep
+                continue
 
-            # We are within the booking window (e.g., 2:58:55 PM onwards for a 3 PM booking)
             print(f"Approaching booking time. Current time: {now.strftime('%H:%M:%S')}. Initiating rapid attempts...")
-            # Loop quickly checking current time until it's just before or at the target second buffer
             booking_success = False
             for attempt in range(10): # Try 10 times in quick succession
                 current_time = datetime.now()
@@ -365,22 +337,22 @@ def main():
                     if book_gym_slot(driver):
                         print("Booking completed successfully!")
                         booking_success = True
-                        break # Exit loop upon successful booking
+                        break
                     else:
                         print("Booking attempt failed. Retrying in 1 second...")
-                        time.sleep(1) # Wait a short moment before retrying
+                        time.sleep(1)
                 elif current_time.hour > TARGET_HOUR or (current_time.hour == TARGET_HOUR and current_time.minute > TARGET_MINUTE + 2):
                     print("Booking window likely closed or slot taken. Exiting retries.")
-                    break # Exit inner loop if time has passed significantly
+                    break
                 else:
-                    time.sleep(0.1) # Check every 100ms for precise timing
+                    time.sleep(0.1)
 
             if booking_success:
-                break # Exit outer loop if booking was successful
+                break
 
             if not booking_success:
                 print("All booking attempts failed within the window. Exiting.")
-                break # Exit if all attempts within the window failed
+                break
 
     finally:
         print("\nClosing browser...")
